@@ -1,4 +1,4 @@
-# Unit test for SemVer parsing / comparison (no network).
+// Unit test for SemVer parsing / comparison (no network).
 
 #include "system/version.h"
 
