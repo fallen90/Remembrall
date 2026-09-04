@@ -26,17 +26,28 @@ New-Item -ItemType Directory -Force -Path $Temp | Out-Null
 $Archive = Join-Path $Temp $Asset
 $Extract = Join-Path $Temp "extract"
 
-Write-Host "Downloading $Url"
-# curl.exe is far more reliable than Invoke-WebRequest on GitHub Actions for large assets.
-& curl.exe -fsSL --retry 5 --retry-delay 2 -o $Archive $Url
+Write-Host "[$(Get-Date -Format o)] Downloading $Url"
+# Explicit timeouts — GHA Windows runners can hang forever without --max-time.
+& curl.exe -L --retry 5 --retry-all-errors --connect-timeout 30 --max-time 180 `
+  -o $Archive $Url
 if ($LASTEXITCODE -ne 0) { throw "curl failed with exit $LASTEXITCODE" }
+$bytes = (Get-Item $Archive).Length
+Write-Host "[$(Get-Date -Format o)] Downloaded $bytes bytes"
 
 if (Test-Path $Extract) { Remove-Item -Recurse -Force $Extract }
 New-Item -ItemType Directory -Force -Path $Extract | Out-Null
 
-Write-Host "Extracting $Archive"
-tar.exe -xjf $Archive -C $Extract
-if ($LASTEXITCODE -ne 0) { throw "tar extract failed with exit $LASTEXITCODE" }
+# Windows bsdtar often stalls on .tar.bz2; Python's tarfile is reliable.
+Write-Host "[$(Get-Date -Format o)] Extracting with Python tarfile"
+$py = @"
+import tarfile, sys
+with tarfile.open(r'''$Archive''', 'r:bz2') as t:
+    t.extractall(r'''$Extract''')
+print('extracted ok')
+"@
+python -c $py
+if ($LASTEXITCODE -ne 0) { throw "python extract failed with exit $LASTEXITCODE" }
+Write-Host "[$(Get-Date -Format o)] Extract complete"
 
 $Inner = Get-ChildItem $Extract -Directory | Select-Object -First 1
 if (-not $Inner) { throw "Unexpected archive layout for $Asset" }
@@ -49,4 +60,4 @@ if (-not (Test-Path $Marker)) {
   throw "Download succeeded but cxx-api.h missing under $DestRoot"
 }
 
-Write-Host "Installed sherpa-onnx $Version -> $DestRoot"
+Write-Host "[$(Get-Date -Format o)] Installed sherpa-onnx $Version -> $DestRoot"
