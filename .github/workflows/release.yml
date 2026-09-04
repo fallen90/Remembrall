@@ -73,30 +73,16 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           if (Test-Path $vswhere) {
             & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property displayName
-            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           }
-          # windows-2022 provides VS 2022; keep a fallback list for future images.
-          $generators = @(
-            "Visual Studio 17 2022",
-            "Visual Studio 18 2026"
-          )
-          $configured = $false
-          foreach ($gen in $generators) {
-            Write-Host "Trying generator: $gen"
-            if (Test-Path build) { Remove-Item -Recurse -Force build }
-            cmake -S . -B build -G $gen -A x64 `
-              "-DLTA_GITHUB_REPO=${{ steps.ver.outputs.repo }}" `
-              -DLTA_BUILD_TESTS=ON `
-              -DLTA_BUILD_CAPTURE_POC=OFF `
-              -DLTA_FETCH_SHERPA=ON `
-              -DWIL_BUILD_TESTS=OFF `
-              -DWIL_BUILD_PACKAGING=OFF
-            if ($LASTEXITCODE -eq 0) {
-              $configured = $true
-              break
-            }
-          }
-          if (-not $configured) { throw "CMake configure failed for all Visual Studio generators" }
+          if (Test-Path build) { Remove-Item -Recurse -Force build }
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            "-DLTA_GITHUB_REPO=${{ steps.ver.outputs.repo }}" `
+            -DLTA_BUILD_TESTS=ON `
+            -DLTA_BUILD_CAPTURE_POC=OFF `
+            -DLTA_FETCH_SHERPA=ON `
+            -DWIL_BUILD_TESTS=OFF `
+            -DWIL_BUILD_PACKAGING=OFF
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
       - name: Build
         run: cmake --build build --config RelWithDebInfo --parallel
 

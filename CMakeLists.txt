@@ -58,14 +58,27 @@ if(LTA_FETCH_SHERPA)
   set(SHERPA_ONNX_ENABLE_TTS OFF CACHE BOOL "" FORCE)
   set(SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION OFF CACHE BOOL "" FORCE)
   set(SHERPA_ONNX_ENABLE_BINARY OFF CACHE BOOL "" FORCE)
-  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(SHERPA_ONNX_BUILD_C_API_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(SHERPA_ONNX_ENABLE_C_API ON CACHE BOOL "" FORCE)
+  # Shared libs avoid sherpa's forced /MT static-CRT clash with our /MD app.
+  set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+
   FetchContent_Declare(
     sherpa-onnx
     GIT_REPOSITORY https://github.com/k2-fsa/sherpa-onnx.git
     GIT_TAG v1.10.46
     GIT_SHALLOW TRUE
   )
-  FetchContent_MakeAvailable(sherpa-onnx)
+  FetchContent_GetProperties(sherpa-onnx)
+  if(NOT sherpa-onnx_POPULATED)
+    FetchContent_Populate(sherpa-onnx)
+    # sherpa-onnx CMakeLists appends ${CMAKE_SOURCE_DIR}/cmake, which points at
+    # *this* project when embedded. Prepend the real sherpa cmake dirs first.
+    list(PREPEND CMAKE_MODULE_PATH
+      "${sherpa-onnx_SOURCE_DIR}/cmake"
+      "${sherpa-onnx_SOURCE_DIR}/cmake/Modules")
+    add_subdirectory(${sherpa-onnx_SOURCE_DIR} ${sherpa-onnx_BINARY_DIR} EXCLUDE_FROM_ALL)
+  endif()
 endif()
 
 set(LTA_COMMON_SOURCES
@@ -151,6 +164,20 @@ target_link_libraries(Remembrall PRIVATE
   dwmapi
 )
 target_compile_definitions(Remembrall PRIVATE LTA_APP=1)
+
+# Copy sherpa/onnxruntime DLLs next to the exe for portable runs.
+if(LTA_FETCH_SHERPA AND WIN32)
+  add_custom_command(TARGET Remembrall POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+      "$<TARGET_FILE_DIR:Remembrall>"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_BINARY_DIR}/bin"
+      "$<TARGET_FILE_DIR:Remembrall>"
+    VERBATIM
+  )
+endif()
+
 # Ensure the resource compiler finds remembrall.ico next to the .rc file.
 set_source_files_properties(src/app/remembrall.rc PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/app
