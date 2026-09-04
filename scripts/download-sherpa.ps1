@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $DestRoot) {
   $DestRoot = Join-Path $RepoRoot "third_party\sherpa-onnx"
@@ -26,13 +27,17 @@ $Archive = Join-Path $Temp $Asset
 $Extract = Join-Path $Temp "extract"
 
 Write-Host "Downloading $Url"
-Invoke-WebRequest -Uri $Url -OutFile $Archive -UseBasicParsing
+# curl.exe is far more reliable than Invoke-WebRequest on GitHub Actions for large assets.
+& curl.exe -fsSL --retry 5 --retry-delay 2 -o $Archive $Url
+if ($LASTEXITCODE -ne 0) { throw "curl failed with exit $LASTEXITCODE" }
 
 if (Test-Path $Extract) { Remove-Item -Recurse -Force $Extract }
 New-Item -ItemType Directory -Force -Path $Extract | Out-Null
 
-# tar.exe on Windows 10+ handles .tar.bz2
-tar -xjf $Archive -C $Extract
+Write-Host "Extracting $Archive"
+tar.exe -xjf $Archive -C $Extract
+if ($LASTEXITCODE -ne 0) { throw "tar extract failed with exit $LASTEXITCODE" }
+
 $Inner = Get-ChildItem $Extract -Directory | Select-Object -First 1
 if (-not $Inner) { throw "Unexpected archive layout for $Asset" }
 
