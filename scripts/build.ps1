@@ -12,11 +12,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Build = Join-Path $Root "build"
 
-if (-not (Test-Path (Join-Path $Root "models\zipformer-en\tokens.txt"))) {
-  Write-Host "Models not found — running download-models.ps1"
-  & (Join-Path $PSScriptRoot "download-models.ps1")
-}
-
+# Models are downloaded by Remembrall.exe on first launch; optional for local build.
 & (Join-Path $PSScriptRoot "download-sherpa.ps1")
 
 $SherpaRoot = Join-Path $Root "third_party\sherpa-onnx"

@@ -4,6 +4,7 @@
 #include "system/diagnostics.h"
 #include "system/logger.h"
 #include "system/memory_monitor.h"
+#include "system/model_installer.h"
 #include "system/process_monitor.h"
 #include "system/version.h"
 
@@ -21,12 +22,48 @@ constexpr size_t kFloatBytes = sizeof(float);
 constexpr int kMonitorIntervalMs = 750;
 constexpr size_t kPreprocessReadBytes = 48000 * 2 * sizeof(float) / 20;  // ~50 ms @ 48k stereo
 
+std::wstring Utf8ToWide(const std::string& s) {
+  if (s.empty()) {
+    return {};
+  }
+  const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+  std::wstring out(static_cast<size_t>(n), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
+  return out;
+}
+
 }  // namespace
 
 Application::Application() = default;
 
 Application::~Application() {
   Shutdown();
+}
+
+bool Application::TryLoadRecognizer() {
+  if (!ModelInstaller::IsInstalled(config_.model_directory)) {
+    return false;
+  }
+  if (!recognizer_.Initialize(config_.model_directory,
+                              config_.asr_num_threads,
+                              config_.endpoint_rule1_silence_s,
+                              config_.endpoint_rule2_silence_s,
+                              config_.endpoint_rule3_min_utterance_s)) {
+    state_machine_.OnAsrFailed("Failed to load ASR model");
+    LTA_LOG_ERROR("ASR model load failed");
+    return false;
+  }
+  models_ready_.store(true);
+  {
+    std::lock_guard lock(status_mutex_);
+    model_status_.clear();
+  }
+  if (active_pid_.load() != 0) {
+    state_machine_.OnTranscribing();
+  } else {
+    state_machine_.Transition(AppState::SearchingForDiscord);
+  }
+  return true;
 }
 
 bool Application::Initialize(Configuration config) {
@@ -51,14 +88,12 @@ bool Application::Initialize(Configuration config) {
     RequestRecovery("Audio device change");
   });
 
-  if (!recognizer_.Initialize(config_.model_directory,
-                              config_.asr_num_threads,
-                              config_.endpoint_rule1_silence_s,
-                              config_.endpoint_rule2_silence_s,
-                              config_.endpoint_rule3_min_utterance_s)) {
-    state_machine_.OnAsrFailed("Failed to load ASR model");
-    LTA_LOG_ERROR("ASR model load failed — UI will still run for diagnostics");
-    // Continue: UI can show error; recovery may retry after model appears.
+  if (ModelInstaller::IsInstalled(config_.model_directory)) {
+    TryLoadRecognizer();
+  } else {
+    state_machine_.Transition(AppState::AsrFailed);
+    std::lock_guard lock(status_mutex_);
+    model_status_ = "Speech model will download on first launch…";
   }
 
   updater_.SetEnabled(config_.check_for_updates);
@@ -68,7 +103,9 @@ bool Application::Initialize(Configuration config) {
     updater_.SetGithubRepo(DefaultGithubRepo());
   }
 
-  state_machine_.Transition(AppState::SearchingForDiscord);
+  if (models_ready_.load()) {
+    state_machine_.Transition(AppState::SearchingForDiscord);
+  }
   return true;
 }
 
@@ -80,11 +117,28 @@ void Application::Start() {
   preprocess_thread_ = std::thread([this] { PreprocessLoop(); });
   asr_thread_ = std::thread([this] { AsrLoop(); });
   memory_thread_ = std::thread([this] { MemoryPollLoop(); });
+  if (!models_ready_.load()) {
+    model_thread_ = std::thread([this] { ModelSetupLoop(); });
+  }
 
   if (config_.check_for_updates) {
     updater_.CheckForUpdatesAsync(false);
   }
   LTA_LOG_INFO(std::string("Application workers started v") + CurrentVersionString());
+}
+
+void Application::ModelSetupLoop() {
+  const bool ok = ModelInstaller::EnsureInstalled(
+      config_.model_directory,
+      [this](const std::string& msg) {
+        std::lock_guard lock(status_mutex_);
+        model_status_ = msg;
+      });
+  if (!ok) {
+    state_machine_.OnAsrFailed("Speech model download failed");
+    return;
+  }
+  TryLoadRecognizer();
 }
 
 void Application::CheckForUpdates(bool interactive) {
@@ -111,11 +165,18 @@ void Application::Shutdown() {
   join(preprocess_thread_);
   join(asr_thread_);
   join(memory_thread_);
+  join(model_thread_);
   state_machine_.Transition(AppState::ShuttingDown);
   LTA_LOG_INFO("Application shutdown complete");
 }
 
 std::wstring Application::StatusLine() const {
+  {
+    std::lock_guard lock(status_mutex_);
+    if (!model_status_.empty()) {
+      return Utf8ToWide(model_status_);
+    }
+  }
   const auto snap = Diagnostics::Instance().Snapshot();
   std::wostringstream oss;
   const char* s = ToString(state_machine_.State());

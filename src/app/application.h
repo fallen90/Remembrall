@@ -44,12 +44,15 @@ class Application {
   bool ApplyPendingUpdate();
 
   [[nodiscard]] std::wstring StatusLine() const;
+  [[nodiscard]] bool ModelsReady() const { return models_ready_.load(); }
 
  private:
   void SessionMonitorLoop();
   void PreprocessLoop();
   void AsrLoop();
   void MemoryPollLoop();
+  void ModelSetupLoop();
+  bool TryLoadRecognizer();
 
   bool StartCaptureForPid(uint32_t pid);
   void StopCapture();
@@ -82,12 +85,17 @@ class Application {
 
   std::atomic<bool> running_{false};
   std::atomic<bool> recovery_requested_{false};
+  std::atomic<bool> models_ready_{false};
   std::atomic<uint32_t> active_pid_{0};
+
+  mutable std::mutex status_mutex_;
+  std::string model_status_;
 
   std::thread session_thread_;
   std::thread preprocess_thread_;
   std::thread asr_thread_;
   std::thread memory_thread_;
+  std::thread model_thread_;
 };
 
 }  // namespace lta

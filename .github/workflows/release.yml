@@ -108,14 +108,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item $exe.FullName $stage
           Get-ChildItem $exe.Directory.FullName -Filter *.dll | Copy-Item -Destination $stage
-          Copy-Item scripts/download-models.ps1 $stage -ErrorAction SilentlyContinue
           if (Test-Path assets/remembrall.png) { Copy-Item assets/remembrall.png $stage }
           @"
           Remembrall $v
 
-          1. Run download-models.ps1 once (needs network)
-          2. Start Remembrall.exe
-          3. Join a Discord voice call — live transcripts appear automatically
+          1. Start Remembrall.exe
+          2. On first launch the speech model downloads automatically (~70 MB)
+          3. Join a Discord voice call — live transcripts appear
 
           Updates: Remembrall checks GitHub Releases on ${{ github.repository }} for Remembrall-windows-x64*.zip
           "@ | Set-Content "$stage/GETTING_STARTED.txt"
@@ -141,8 +140,8 @@ jobs:
 
           ### Install
           1. Unzip ``Remembrall-windows-x64-v$v.zip``
-          2. Run ``download-models.ps1`` once
-          3. Start ``Remembrall.exe``
+          2. Start ``Remembrall.exe`` — the speech model downloads automatically on first launch
+          3. Join a Discord voice call
 
           ### Auto-update
           Installed copies check this repository's latest release for ``Remembrall-windows-x64*.zip``.

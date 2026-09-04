@@ -1,5 +1,6 @@
-# Download default English streaming Zipformer INT8 model for Remembrall.
-# Run from repo root on Windows (PowerShell):
+# Developer helper only — Remembrall downloads models itself on first launch.
+# Prefer just running Remembrall.exe. Use this for offline/CI prep if needed.
+#
 #   .\scripts\download-models.ps1
 
 $ErrorActionPreference = "Stop"
@@ -11,14 +12,14 @@ $Archive = Join-Path $env:TEMP "sherpa-onnx-streaming-zipformer-en-2023-06-26.ta
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 
 Write-Host "Downloading $Url"
-Invoke-WebRequest -Uri $Url -OutFile $Archive
+& curl.exe -L --retry 5 --connect-timeout 30 --max-time 600 -o $Archive $Url
+if ($LASTEXITCODE -ne 0) { throw "download failed" }
 
 Write-Host "Extracting..."
-# Requires tar (Windows 10+).
 $ExtractDir = Join-Path $env:TEMP "sherpa-zipformer-en-extract"
 if (Test-Path $ExtractDir) { Remove-Item -Recurse -Force $ExtractDir }
 New-Item -ItemType Directory -Force -Path $ExtractDir | Out-Null
-tar -xjf $Archive -C $ExtractDir
+tar.exe -xjf $Archive -C $ExtractDir
 
 $Inner = Get-ChildItem $ExtractDir -Directory | Select-Object -First 1
 Copy-Item (Join-Path $Inner.FullName "encoder-epoch-99-avg-1.int8.onnx") $Dest -Force

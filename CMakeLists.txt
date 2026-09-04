@@ -126,6 +126,7 @@ set(LTA_COMMON_SOURCES
   src/system/version.cpp
   src/system/http_client.cpp
   src/system/auto_updater.cpp
+  src/system/model_installer.cpp
   src/audio/audio_format.cpp
   src/audio/ring_buffer.cpp
   src/audio/resampler.cpp
