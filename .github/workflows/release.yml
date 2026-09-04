@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver without v prefix (e.g. 1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $v = "${{ inputs.version }}"
+          } else {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version: $v" }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=v$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "repo=${{ github.repository }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Releasing $v for ${{ github.repository }}"
+
+      - name: Ensure git tag (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rev-parse -q --verify "refs/tags/$tag" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            git tag -a $tag -m "Remembrall ${{ steps.ver.outputs.version }}"
+            git push origin $tag
+          }
+
+      - name: Bump CMake project version
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $path = "CMakeLists.txt"
+          $c = Get-Content $path -Raw
+          $c = [regex]::Replace($c, 'project\(remembrall VERSION \d+\.\d+\.\d+', "project(remembrall VERSION $v")
+          Set-Content $path $c -NoNewline
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            "-DLTA_GITHUB_REPO=${{ steps.ver.outputs.repo }}" `
+            -DLTA_BUILD_TESTS=ON `
+            -DLTA_BUILD_CAPTURE_POC=OFF `
+            -DLTA_FETCH_SHERPA=ON
+
+      - name: Build
+        run: cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $exe = Get-ChildItem -Path build -Recurse -Filter Remembrall.exe |
+            Where-Object { $_.FullName -match "RelWithDebInfo" } |
+            Select-Object -First 1
+          if (-not $exe) { throw "Remembrall.exe not found" }
+          $stage = "dist/Remembrall-$v"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item $exe.FullName $stage
+          Get-ChildItem $exe.Directory.FullName -Filter *.dll | Copy-Item -Destination $stage
+          Copy-Item scripts/download-models.ps1 $stage -ErrorAction SilentlyContinue
+          if (Test-Path assets/remembrall.png) { Copy-Item assets/remembrall.png $stage }
+          @"
+          Remembrall $v
+
+          1. Run download-models.ps1 once (needs network)
+          2. Start Remembrall.exe
+          3. Join a Discord voice call — live transcripts appear automatically
+
+          Updates: Remembrall checks GitHub Releases on ${{ github.repository }} for Remembrall-windows-x64*.zip
+          "@ | Set-Content "$stage/GETTING_STARTED.txt"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $zip = "dist/Remembrall-windows-x64-v$v.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip
+          Get-Item $zip | Format-List FullName, Length
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $v = "${{ steps.ver.outputs.version }}"
+          $zip = "dist/Remembrall-windows-x64-v$v.zip"
+          if (-not (Test-Path $zip)) { throw "Missing package $zip" }
+          $notes = @"
+          ## Remembrall $v
+
+          Portable Windows x64 build.
+
+          ### Install
+          1. Unzip ``Remembrall-windows-x64-v$v.zip``
+          2. Run ``download-models.ps1`` once
+          3. Start ``Remembrall.exe``
+
+          ### Auto-update
+          Installed copies check this repository's latest release for ``Remembrall-windows-x64*.zip``.
+          "@
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip --clobber
+            gh release edit $tag --title "Remembrall $v" --notes $notes
+          } else {
+            gh release create $tag $zip --title "Remembrall $v" --notes $notes
+          }
+          Write-Host "Published https://github.com/${{ github.repository }}/releases/tag/$tag"

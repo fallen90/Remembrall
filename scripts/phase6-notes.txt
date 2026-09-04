@@ -1,0 +1,33 @@
+# Remembrall — Windows build notes (Phase 6)
+
+## Prerequisites
+- Windows 10 build 20348+ / Windows 11
+- Visual Studio 2022 (Desktop C++), Windows SDK >= 10.0.20348
+- CMake 3.24+
+- Discord installed for capture validation
+
+## Build
+```powershell
+.\scripts\download-models.ps1
+.\scripts\build.ps1
+```
+
+Outputs under `build\RelWithDebInfo\`:
+- `Remembrall.exe` — full UI app
+- `remembrall-capture-poc.exe` — Phase 1 capture harness
+- `lta_tests.exe` — unit tests
+
+## Tuned defaults (re-measure on AMD APU)
+| Knob | Value | Rationale |
+|------|-------|-----------|
+| Capture ring | ~500 ms | Absorbs UI/ASR jitter without multi-second lag |
+| ASR queue | 1.0 s @ 16 kHz | Drop oldest under backpressure (freshness > completeness) |
+| Endpoint rule2 | 0.8 s | Faster Discord turn finalization |
+| ASR threads | 1 | Stable latency / lower RAM on APU |
+| UI timer | 100 ms | Matches partial update cadence target |
+| Provider | CPU | Avoid Radeon/DirectML contention with Discord |
+
+## Validation
+Follow `scripts/acceptance-checklist.txt` on hardware with Discord + headset.
+Use Ctrl+Shift+D for RTF / working-set / drop counters.
+F2 opens settings (always on top, launch with Windows, partials).

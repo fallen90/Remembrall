@@ -1,0 +1,20 @@
+# Tuned defaults for Phase 6 (AMD APU / CPU INT8 streaming).
+# Applied via Configuration::LoadDefaults — measure on target hardware and adjust.
+
+# Capture ring: ~500 ms @ 48 kHz stereo float32
+# ASR queue: 1.0 s @ 16 kHz mono (drop oldest under backpressure)
+# Endpoint: rule2 0.8s trailing silence for Discord turn-taking (faster than default 1.2s)
+# ASR threads: 1 (predictable latency, lower RAM)
+# UI refresh: 100 ms (partial update cadence)
+
+# Acceptance checklist (run on Windows with Discord):
+# [ ] Discord playback unaffected (A/B with app closed)
+# [ ] Mic works; app never opens capture on input device
+# [ ] Only Discord audio transcribed (play Spotify — no text)
+# [ ] Partial text typically <300 ms after speech onset
+# [ ] Final within ~700 ms after pause
+# [ ] Working set <700 MB streaming-only (prefer <500)
+# [ ] RTF < 1.0 (prefer <= 0.5) in diagnostics (Ctrl+Shift+D)
+# [ ] Survive Discord restart without app restart
+# [ ] Survive BT reconnect / output device switch
+# [ ] 2-hour call without hang or unbounded memory growth
