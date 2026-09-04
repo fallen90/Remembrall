@@ -17,7 +17,12 @@ if (-not (Test-Path (Join-Path $Root "models\zipformer-en\tokens.txt"))) {
   & (Join-Path $PSScriptRoot "download-models.ps1")
 }
 
-cmake -S $Root -B $Build -G "Visual Studio 17 2022" -A x64
+& (Join-Path $PSScriptRoot "download-sherpa.ps1")
+
+$SherpaRoot = Join-Path $Root "third_party\sherpa-onnx"
+cmake -S $Root -B $Build -G "Visual Studio 17 2022" -A x64 `
+  "-DLTA_SHERPA_ROOT=$SherpaRoot" `
+  -DLTA_FETCH_SHERPA=OFF
 cmake --build $Build --config $Config --parallel
 
 Write-Host "Built: $Build\$Config\Remembrall.exe"

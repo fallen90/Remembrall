@@ -13,7 +13,10 @@ endif()
 
 option(LTA_BUILD_TESTS "Build unit tests" ON)
 option(LTA_BUILD_CAPTURE_POC "Build capture POC console harness" ON)
-option(LTA_FETCH_SHERPA "Fetch and build sherpa-onnx" ON)
+# Prefer official Windows prebuilts (LTA_SHERPA_ROOT). Source FetchContent is optional
+# and often breaks on newer MSVC (openfst / C++20 STL removals).
+option(LTA_FETCH_SHERPA "Fetch and build sherpa-onnx from source" OFF)
+set(LTA_SHERPA_ROOT "" CACHE PATH "Prebuilt sherpa-onnx root (contains include/ and lib/)")
 set(LTA_GITHUB_REPO "fallen90/Remembrall" CACHE STRING "GitHub owner/repo for auto-update")
 
 # Embed semver into the binary for updater comparisons.
@@ -51,7 +54,37 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(wil)
 
-if(LTA_FETCH_SHERPA)
+set(LTA_HAS_SHERPA_LINK FALSE)
+set(LTA_SHERPA_DLL_DIR "")
+
+if(LTA_SHERPA_ROOT STREQUAL "" AND DEFINED ENV{LTA_SHERPA_ROOT})
+  set(LTA_SHERPA_ROOT "$ENV{LTA_SHERPA_ROOT}")
+endif()
+
+# Auto-detect third_party prebuilt layout from scripts/download-sherpa.ps1
+if(LTA_SHERPA_ROOT STREQUAL "")
+  set(_lta_default_sherpa "${CMAKE_SOURCE_DIR}/third_party/sherpa-onnx")
+  if(EXISTS "${_lta_default_sherpa}/include/sherpa-onnx/c-api/cxx-api.h")
+    set(LTA_SHERPA_ROOT "${_lta_default_sherpa}")
+  endif()
+endif()
+
+if(NOT LTA_SHERPA_ROOT STREQUAL "")
+  if(NOT EXISTS "${LTA_SHERPA_ROOT}/include/sherpa-onnx/c-api/cxx-api.h")
+    message(FATAL_ERROR "LTA_SHERPA_ROOT=${LTA_SHERPA_ROOT} missing include/sherpa-onnx/c-api/cxx-api.h")
+  endif()
+  add_library(lta_sherpa_prebuilt INTERFACE)
+  target_include_directories(lta_sherpa_prebuilt INTERFACE "${LTA_SHERPA_ROOT}/include")
+  target_link_directories(lta_sherpa_prebuilt INTERFACE "${LTA_SHERPA_ROOT}/lib")
+  # Link import libs; runtime DLLs are copied next to Remembrall.exe.
+  target_link_libraries(lta_sherpa_prebuilt INTERFACE
+    sherpa-onnx-cxx-api
+    sherpa-onnx-c-api
+  )
+  set(LTA_HAS_SHERPA_LINK TRUE)
+  set(LTA_SHERPA_DLL_DIR "${LTA_SHERPA_ROOT}/lib")
+  message(STATUS "Using prebuilt sherpa-onnx at ${LTA_SHERPA_ROOT}")
+elseif(LTA_FETCH_SHERPA)
   set(SHERPA_ONNX_ENABLE_PYTHON OFF CACHE BOOL "" FORCE)
   set(SHERPA_ONNX_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
   set(SHERPA_ONNX_ENABLE_CHECK OFF CACHE BOOL "" FORCE)
@@ -68,7 +101,7 @@ if(LTA_FETCH_SHERPA)
   FetchContent_Declare(
     sherpa-onnx
     GIT_REPOSITORY https://github.com/k2-fsa/sherpa-onnx.git
-    GIT_TAG v1.10.46
+    GIT_TAG v1.12.23
     GIT_SHALLOW TRUE
   )
   FetchContent_GetProperties(sherpa-onnx)
@@ -81,6 +114,7 @@ if(LTA_FETCH_SHERPA)
       "${sherpa-onnx_SOURCE_DIR}/cmake/Modules")
     add_subdirectory(${sherpa-onnx_SOURCE_DIR} ${sherpa-onnx_BINARY_DIR} EXCLUDE_FROM_ALL)
   endif()
+  set(LTA_HAS_SHERPA_LINK TRUE)
 endif()
 
 set(LTA_COMMON_SOURCES
@@ -138,13 +172,15 @@ target_link_libraries(lta_core PUBLIC
   shell32
 )
 
-if(LTA_FETCH_SHERPA)
-  if(TARGET sherpa-onnx-cxx-api)
+if(LTA_HAS_SHERPA_LINK)
+  if(TARGET lta_sherpa_prebuilt)
+    target_link_libraries(lta_core PUBLIC lta_sherpa_prebuilt)
+  elseif(TARGET sherpa-onnx-cxx-api)
     target_link_libraries(lta_core PUBLIC sherpa-onnx-cxx-api)
   elseif(TARGET sherpa-onnx-c-api)
     target_link_libraries(lta_core PUBLIC sherpa-onnx-c-api)
   else()
-    message(FATAL_ERROR "sherpa-onnx C++ API target not found after FetchContent")
+    message(FATAL_ERROR "sherpa-onnx C++ API target not found")
   endif()
   target_compile_definitions(lta_core PUBLIC LTA_HAS_SHERPA=1)
 endif()
@@ -168,19 +204,6 @@ target_link_libraries(Remembrall PRIVATE
   dwmapi
 )
 target_compile_definitions(Remembrall PRIVATE LTA_APP=1)
-
-# Copy sherpa/onnxruntime DLLs next to the exe for portable runs.
-if(LTA_FETCH_SHERPA AND WIN32)
-  add_custom_command(TARGET Remembrall POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
-      "$<TARGET_FILE_DIR:Remembrall>"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_BINARY_DIR}/bin"
-      "$<TARGET_FILE_DIR:Remembrall>"
-    VERBATIM
-  )
-endif()
 
 # Ensure the resource compiler finds remembrall.ico next to the .rc file.
 set_source_files_properties(src/app/remembrall.rc PROPERTIES
@@ -207,6 +230,33 @@ if(LTA_BUILD_TESTS)
   target_compile_features(lta_tests PRIVATE cxx_std_20)
   target_link_libraries(lta_tests PRIVATE lta_core)
   add_test(NAME lta_tests COMMAND lta_tests)
+endif()
+
+# Copy sherpa/onnxruntime DLLs next to runtime binaries for portable runs.
+if(WIN32 AND LTA_HAS_SHERPA_LINK AND NOT LTA_SHERPA_DLL_DIR STREQUAL "")
+  file(GLOB _lta_sherpa_dlls "${LTA_SHERPA_DLL_DIR}/*.dll")
+  foreach(_tgt IN ITEMS Remembrall lta_tests remembrall-capture-poc)
+    if(TARGET ${_tgt})
+      foreach(_dll IN LISTS _lta_sherpa_dlls)
+        add_custom_command(TARGET ${_tgt} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_dll}"
+            "$<TARGET_FILE_DIR:${_tgt}>"
+          VERBATIM
+        )
+      endforeach()
+    endif()
+  endforeach()
+elseif(WIN32 AND LTA_HAS_SHERPA_LINK AND LTA_FETCH_SHERPA)
+  add_custom_command(TARGET Remembrall POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+      "$<TARGET_FILE_DIR:Remembrall>"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_BINARY_DIR}/bin"
+      "$<TARGET_FILE_DIR:Remembrall>"
+    VERBATIM
+  )
 endif()
 
 install(TARGETS Remembrall RUNTIME DESTINATION bin)

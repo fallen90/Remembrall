@@ -67,6 +67,11 @@ jobs:
           $c = [regex]::Replace($c, 'project\(remembrall VERSION \d+\.\d+\.\d+', "project(remembrall VERSION $v")
           Set-Content $path $c -NoNewline
 
+      - name: Download sherpa-onnx prebuilts
+        shell: pwsh
+        run: |
+          .\scripts\download-sherpa.ps1 -Version 1.12.23
+
       - name: Configure
         shell: pwsh
         run: |
@@ -75,11 +80,13 @@ jobs:
             & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property displayName
           }
           if (Test-Path build) { Remove-Item -Recurse -Force build }
+          $sherpa = (Resolve-Path "third_party\sherpa-onnx").Path
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             "-DLTA_GITHUB_REPO=${{ steps.ver.outputs.repo }}" `
+            "-DLTA_SHERPA_ROOT=$sherpa" `
+            -DLTA_FETCH_SHERPA=OFF `
             -DLTA_BUILD_TESTS=ON `
             -DLTA_BUILD_CAPTURE_POC=OFF `
-            -DLTA_FETCH_SHERPA=ON `
             -DWIL_BUILD_TESTS=OFF `
             -DWIL_BUILD_PACKAGING=OFF
           if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
