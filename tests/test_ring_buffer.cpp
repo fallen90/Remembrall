@@ -23,10 +23,11 @@ void TestRingBufferBasic() {
 }
 
 void TestRingBufferDropWhenFull() {
-  lta::RingBuffer rb(16);
-  std::vector<uint8_t> data(32, 0xAB);
+  // Capacity is floored at 64 bytes in RingBuffer.
+  lta::RingBuffer rb(64);
+  std::vector<uint8_t> data(128, 0xAB);
   const size_t written = rb.Write(data.data(), data.size());
-  EXPECT_TRUE(written == 16);
+  EXPECT_TRUE(written == 64);
   EXPECT_TRUE(rb.OccupancyPercent() == 100.0);
 }
 
