@@ -50,7 +50,7 @@ bool ZipformerRecognizer::Initialize(const std::filesystem::path& model_director
   config.rule1_min_trailing_silence = static_cast<float>(endpoint_rule1_s);
   config.rule2_min_trailing_silence = static_cast<float>(endpoint_rule2_s);
   config.rule3_min_utterance_length = static_cast<float>(endpoint_rule3_s);
-  config.feat_config.sampling_rate = 16000;
+  config.feat_config.sample_rate = 16000;
   config.feat_config.feature_dim = 80;
 
   LTA_LOG_INFO("Loading Zipformer model from " + model_directory.string());
