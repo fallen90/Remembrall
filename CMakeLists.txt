@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 project(remembrall VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# Keep the default at C++17 so sherpa-onnx deps (openfst / ssentencepiece) compile.
+# Remembrall targets opt into C++20 via target_compile_features below.
 
 if(NOT WIN32)
   message(FATAL_ERROR "Remembrall targets Windows 10 build 20348+ only (WASAPI process loopback).")
@@ -110,6 +112,7 @@ set(LTA_UI_SOURCES
 )
 
 add_library(lta_core STATIC ${LTA_COMMON_SOURCES})
+target_compile_features(lta_core PUBLIC cxx_std_20)
 target_include_directories(lta_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -151,6 +154,7 @@ add_executable(Remembrall WIN32
   src/app/remembrall.rc
   ${LTA_UI_SOURCES}
 )
+target_compile_features(Remembrall PRIVATE cxx_std_20)
 target_include_directories(Remembrall PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/app
 )
@@ -187,6 +191,7 @@ if(LTA_BUILD_CAPTURE_POC)
   add_executable(remembrall-capture-poc
     src/tools/capture_poc_main.cpp
   )
+  target_compile_features(remembrall-capture-poc PRIVATE cxx_std_20)
   target_link_libraries(remembrall-capture-poc PRIVATE lta_core)
 endif()
 
@@ -199,6 +204,7 @@ if(LTA_BUILD_TESTS)
     tests/test_version.cpp
     tests/test_main.cpp
   )
+  target_compile_features(lta_tests PRIVATE cxx_std_20)
   target_link_libraries(lta_tests PRIVATE lta_core)
   add_test(NAME lta_tests COMMAND lta_tests)
 endif()
