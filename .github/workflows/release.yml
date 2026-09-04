@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # windows-latest is VS 2026 (generator "Visual Studio 18 2026").
+    # Pin to windows-2022 for the VS 17 / CMake 3.24 toolchain this project uses.
+    runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - name: Checkout
@@ -68,12 +70,31 @@ jobs:
       - name: Configure
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-            "-DLTA_GITHUB_REPO=${{ steps.ver.outputs.repo }}" `
-            -DLTA_BUILD_TESTS=ON `
-            -DLTA_BUILD_CAPTURE_POC=OFF `
-            -DLTA_FETCH_SHERPA=ON
-
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property displayName
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          }
+          # Prefer the newest installed VS generator CMake understands.
+          $generators = @(
+            "Visual Studio 18 2026",
+            "Visual Studio 17 2022"
+          )
+          $configured = $false
+          foreach ($gen in $generators) {
+            Write-Host "Trying generator: $gen"
+            cmake -S . -B build -G $gen -A x64 `
+              "-DLTA_GITHUB_REPO=${{ steps.ver.outputs.repo }}" `
+              -DLTA_BUILD_TESTS=ON `
+              -DLTA_BUILD_CAPTURE_POC=OFF `
+              -DLTA_FETCH_SHERPA=ON
+            if ($LASTEXITCODE -eq 0) {
+              $configured = $true
+              break
+            }
+            if (Test-Path build) { Remove-Item -Recurse -Force build }
+          }
+          if (-not $configured) { throw "CMake configure failed for all Visual Studio generators" }
       - name: Build
         run: cmake --build build --config RelWithDebInfo --parallel
 
